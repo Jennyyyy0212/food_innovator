@@ -20,28 +20,27 @@ st.caption("Gemini 2.5 + Streamlit · 從關鍵字到靈感樹與研發八問分
 api_key = os.getenv("GOOGLE_API_KEY", "")
 with st.sidebar:
     st.header("🔐 API 設定")
-
-    # Masked input (still hidden)
-    sidebar_key = st.text_input("GOOGLE_API_KEY（不會儲存）", value=api_key, type="password")
-
-    model_name = st.selectbox("Gemini 模型", ["gemini-2.5-flash"], index=0)
-    st.markdown("---")
-
     # Only show status — never the key itself
-    if sidebar_key:
+    if api_key != "":
         st.success("✅ 已設定 Gemini API 金鑰")
     else:
         st.warning("⚠️ 尚未設定 API 金鑰")
 
+
+    model_name = st.selectbox("Gemini 模型", ["gemini-2.5-flash"], index=0)
+    st.markdown("---")
+
+    
+
     st.caption("到 Google AI Studio 取得金鑰 → https://aistudio.google.com/")
 
 
-if not sidebar_key:
+if api_key == "":
     st.stop()  # stop the app until API key entered
 
 # ✅ 新 SDK 初始化
 try:
-    client = genai.Client(api_key=sidebar_key)
+    client = genai.Client(api_key=api_key)
 except Exception as e:
     st.error(f"❌ 初始化 Gemini 失敗：{e}")
     st.stop()
