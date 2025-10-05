@@ -205,7 +205,7 @@ def gemini_generate(prompt: str) -> str:
         )
 
         # --- debug preview ---
-        st.write("🪄 Gemini 原始輸出 (清理後)：")
+        # st.write("🪄 Gemini 原始輸出 (清理後)：")
         st.code(cleaned[:500] + ("..." if len(cleaned) > 500 else ""), language="json")
 
         return cleaned
@@ -363,12 +363,10 @@ if clr_btn:
 # Generate base tree
 # -----------------------------------------------------------
 if gen_btn and keyword.strip():
-    st.write("✅ [DEBUG] 生成靈感樹按鈕被按下")
     st.session_state.keyword = keyword.strip()
     with st.spinner("Gemini 正在生成靈感樹..."):
         text = gemini_generate(BASE_PROMPT.format(keyword=keyword))
     data = parse_json_loose(text)
-    st.json(data)
     st.session_state.idea_tree = ensure_node_shape(data, keyword=st.session_state.keyword)
 
 # -----------------------------------------------------------
