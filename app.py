@@ -17,7 +17,7 @@ st.caption("Gemini 2.5 + Streamlit · 從關鍵字到靈感樹與研發八問分
 # -----------------------------------------------------------
 # API key
 # -----------------------------------------------------------
-api_key = "AIzaSyDOMU79t-5AOIIN0MIWbCTK6NiB3uq1PeM"
+api_key = os.getenv("GOOGLE_API_KEY", "")
 with st.sidebar:
     st.header("🔐 API 設定")
     sidebar_key = st.text_input("GOOGLE_API_KEY（不會儲存）", value=api_key, type="password")
