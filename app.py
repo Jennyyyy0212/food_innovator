@@ -22,7 +22,7 @@ with st.sidebar:
     st.header("🔐 API 設定")
 
     # Masked input (still hidden)
-    sidebar_key = st.text_input("GOOGLE_API_KEY（不會儲存）", value="", type="password")
+    sidebar_key = st.text_input("GOOGLE_API_KEY（不會儲存）", value=api_key, type="password")
 
     model_name = st.selectbox("Gemini 模型", ["gemini-2.5-flash"], index=0)
     st.markdown("---")
@@ -39,7 +39,7 @@ with st.sidebar:
 if not sidebar_key:
     st.stop()  # stop the app until API key entered
 
-# ✅ Initialize Gemini safely
+# ✅ 新 SDK 初始化
 try:
     client = genai.Client(api_key=sidebar_key)
 except Exception as e:
