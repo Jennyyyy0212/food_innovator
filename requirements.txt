@@ -61,3 +61,4 @@ tzdata==2025.2
 uritemplate==4.2.0
 urllib3==2.5.0
 websockets==15.0.1
+streamlit-nested-layout==0.1.4
