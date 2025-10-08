@@ -5,14 +5,85 @@ from typing import List, Dict, Any
 import streamlit_nested_layout
 import streamlit as st
 import pandas as pd
+from pathlib import Path
+from bs4 import BeautifulSoup
+from google.genai.types import File
+import time
+
 from google import genai  # ✅ 新版 SDK
 
 tab1, tab2 = st.tabs(["💡 食品靈感生成 AI", "🔬 深度研發與法規 AI"])
+STATE_FILE = "uploaded_reg_files.json"
 
 # -----------------------------------------------------------
 # Page setup
 # -----------------------------------------------------------
 st.set_page_config(page_title="AI 食品靈感引擎 (Gemini + Streamlit)", page_icon="🌿", layout="wide")
+
+
+
+def clean_html(html_text: str) -> str:
+    """移除 script/style/nav/footer 等非正文內容"""
+    soup = BeautifulSoup(html_text, "html.parser")
+    for tag in soup(["script", "style", "nav", "footer", "header"]):
+        tag.decompose()
+    for a in soup.find_all("a", href=True):
+        link_text = a.get_text(strip=True)
+        href = a["href"].strip()
+        if link_text:
+            a.replace_with(f"{link_text} ({href})")
+        else:
+            a.replace_with(href)
+     # Return cleaned plain text
+    return soup.get_text(separator="\n", strip=True)
+
+def ensure_clean_txt_files(folder_path="html_pages", force_clean=False):
+    """清理所有 HTML 並輸出成 TXT（避免多次重做）"""
+    html_dir = Path(folder_path)
+    txt_files = []
+    for html_file in html_dir.glob("*.html"):
+        txt_path = html_file.with_suffix(".txt")
+        if force_clean or not txt_path.exists():
+            html = html_file.read_text(encoding="utf-8")
+            txt_path.write_text(clean_html(html), encoding="utf-8")
+            print(f"✅ Cleaned {html_file.name}")
+        else:
+            print(f"🔁 Using cached clean text: {txt_path.name}")
+        txt_files.append(txt_path)
+    return txt_files
+
+def upload_and_cache_files(client, txt_files, force=False):
+    """只上傳一次；若有紀錄則重用"""
+    state_path = Path(STATE_FILE)
+    uploaded_cache = json.loads(state_path.read_text()) if state_path.exists() else {}
+    
+    # Step 1: 檢查過期或缺失
+    for txt in txt_files:
+        name = txt.name
+        file_info = uploaded_cache.get(name)
+        if force or (not file_info) or is_file_expired(file_info):
+            # 過期或不存在 → 重新上傳
+            print(f"⬆️ Uploading {name} ...")
+            file = client.files.upload(
+                file=txt
+            )
+
+            uploaded_cache[name] = {
+                "file_uri": file.uri,
+                "file_name": file.name,
+                "uploaded_at": time.time()
+            }
+            print(f"☁️ Uploaded {name}")
+        else:
+            print(f"✅ 使用快取: {name}")
+    # Step 2: 儲存快取
+    state_path.write_text(json.dumps(uploaded_cache, indent=2, ensure_ascii=False))
+    return uploaded_cache
+
+def is_file_expired(info, hours=23):
+    """檔案是否超過指定小時數"""
+    return time.time() - info.get("uploaded_at", 0) > hours * 3600
+
 with tab1:
     st.title("🌿 AI 食品靈感引擎（便利店研發 · 互動版）")
     st.caption("Gemini 2.5 + Streamlit · 從關鍵字到靈感樹與研發八問分析")
@@ -503,6 +574,15 @@ with tab1:
 with tab2:
     st.header("🔬 深度研發與法規 AI")
     st.caption("用於分析食品材料、製作方法與不同地區食品法規。")
+    process_log = st.sidebar.empty()
+    def log_msg(msg):
+        """Append process messages to sidebar in real time."""
+        if "log_lines" not in st.session_state:
+            st.session_state.log_lines = []
+        st.session_state.log_lines.append(msg)
+        # Join messages into a scrollable text box
+        process_log.text("\n".join(st.session_state.log_lines[-5:]))  # show last 20 lines
+
 
     st.markdown("""
     這個 AI 模型專注於：
@@ -537,6 +617,14 @@ with tab2:
         options=all_asian_countries,
         default=["台灣"]
     )
+
+    with st.sidebar:
+        if st.button("🔄 重新上傳法規資料"):
+            txt_files = ensure_clean_txt_files("html_pages", force_clean=True)
+            if Path(STATE_FILE).exists():
+                Path(STATE_FILE).unlink()  # 🧹 delete cache file
+            upload_and_cache_files(client, txt_files, force=True)
+            st.success("✅ 法規資料已重新上傳到 Gemini。")
 
     # 主要的法規網站連結
     country_links = {
@@ -607,40 +695,107 @@ with tab2:
                 if not additives:
                     st.info("未偵測到特定添加物，AI 將僅顯示主要食材資訊。")
 
-                # 2️⃣ Build a regulation table
+                # =======================================================
+                # 📘 改為使用本地 HTML 法規文件（Gemini 讀取）
+                # =======================================================
+                txt_files = ensure_clean_txt_files("html_pages")
+                uploaded_files = upload_and_cache_files(client, txt_files)
+                file_refs = []
+                for f in uploaded_files.values():
+                    try:
+                        # Re-fetch the live file reference by name
+                        file_obj = client.files.get(name=f["file_name"])
+                        file_refs.append({"file": file_obj})
+                    except Exception as e:
+                        print(f"⚠️ Cannot fetch {f['file_name']}: {e}")
+
                 reg_results = []
+                unrecognized_outputs = [] 
                 for country in selected_countries:
-                    for add in additives:
+                    for item in ingredients + additives:
                         reg_prompt = f"""
-                        你可以使用 Google Search 進行查詢。
-                        請在以下網站中搜尋「{add}」在「{country}」的食品添加物法規資訊：
-                        {country_links[country]}
+                        你是一位亞洲量產食品法規專家。
+                        請根據附加的法規文件內容，分析「{country}」地區中「{item}」的使用或規範。
 
-                        請回答：
+                        請確認以下資訊：
+                            1. 是否允許該項食材或添加物進入市場／被使用；
+                            2. 若為添加物，請列出最大添加量與允許食品類別；
+                            3. 若為一般食材（如肉類、乳製品、穀物、豆類、水果），請列出是否需標示來源、產地或過敏原；
+                            4. 提供條文名稱或官方來源網址。
+
+                        若找不到明確資料，請標註「資料不足」
+
+                        請說明：
                         - 是否允許使用
-                        - 最大添加量
+                        - 最大添加量或限制
                         - 適用食品類別
-                        - 提供官方來源網址
+                        - 相關條文或法規名稱
+                        - 引用來源段落（如有）
 
-                        以 JSON 格式輸出：
+                        ---
+                        【範例輸出】（請嚴格模仿此格式與鍵名）
+
+                        [
                         {{
-                        "國家": "{country}",
-                        "添加物": "{add}",
-                        "使用狀態": "...",
-                        "最大添加量": "...",
-                        "適用食品類別": "...",
-                        "官方來源": "..."
+                            "國家": "台灣",
+                            "項目": "山梨酸鉀",
+                            "類型": "食品添加物",
+                            "使用狀態": "允許",
+                            "最大添加量": "0.6 g/kg",
+                            "適用食品類別": "飲料、糕點",
+                            "標示或衛生要求": "須標示防腐劑名稱",
+                            "條文或來源": "食品添加物法規 第 15 條"
+                        }},
+                        {{
+                            "國家": "日本",
+                            "項目": "鮮乳",
+                            "類型": "一般食材",
+                            "使用狀態": "允許",
+                            "最大添加量": "不適用",
+                            "適用食品類別": "不適用",
+                            "標示或衛生要求": "須標示乳成分與保存期限",
+                            "條文或來源": "食品標示法 第 6 條"
                         }}
+                        ]
+
+                        ---
+                        請以有效 JSON 陣列格式輸出，不要包含文字說明、Markdown 或其他符號。
                         """
-                        reg_json = parse_json_loose(gemini_generate(reg_prompt))
-                        reg_results.append(reg_json)
+
+                        response = client.models.generate_content(
+                            model=model_name,
+                            contents=[
+                                reg_prompt,
+                                *[File(uri=f["file_uri"], mime_type="text/plain") for f in uploaded_files.values()]
+                            ],
+                        )
+                        reg_json = parse_json_loose(response.text)
+                        # --- Flatten results ---
+                        if isinstance(reg_json, list):
+                            reg_results.extend(reg_json)
+                        elif isinstance(reg_json, dict):
+                            reg_results.append(reg_json)
+                        else:
+                            unrecognized_outputs.append({
+                                "country": country,
+                                "item": item,
+                                "raw_text": response.text or "(空輸出)"
+                            })
+                            print(f" Unrecognized output for {country}-{item}: {type(reg_json)}")
                 try:
                     df = pd.DataFrame(reg_results)
                     # 確保欄位順序一致
-                    cols = ["國家", "添加物", "使用狀態", "最大添加量", "適用食品類別", "官方來源"]
+                    cols = ["國家", "項目", "類型", "使用狀態", "最大添加量", "適用食品類別", "標示或衛生要求", "條文或來源"]
                     df = df[[c for c in cols if c in df.columns]]
                     st.dataframe(df, width='stretch')
-                    st.success("✅ 完成法規查詢（由 Gemini + Google Search 生成）")
+                    st.success("✅ 完成法規查詢（由 Gemini + 本地文件生成）")
+
+                    # 👇 show unrecognized results below the table
+                    if unrecognized_outputs:
+                        st.warning("⚠️ 以下項目未能解析為有效 JSON，已列出原始輸出：")
+                        for bad in unrecognized_outputs:
+                            st.markdown(f"**{bad['country']} - {bad['item']}**")
+                            st.code(bad["raw_text"], language="json")
                 except Exception as e:
                     st.error(f"無法解析 Gemini 輸出：{e}")
     else:
