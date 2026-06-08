@@ -1,0 +1,14 @@
+# Logical regulation sources. Update as_of_date when you refresh exports from the authority.
+sources:
+  - country_code: tw
+    source_id: tw_food_additive_positive_list
+    # Order matters for scripts/build_tw_chunks.py: additives CSV, then category rules.
+    raw_paths:
+      - data/raw/taiwan/tw_additives.csv
+      - data/raw/taiwan/tw_category_rules.csv
+    as_of_date: "2026-04-01"
+    official_url: "https://consumer.fda.gov.tw/Law/FoodAdditivesList.aspx?nodeID=521"
+    notes: >
+      Positive list and category rules used together for Taiwan food additive
+      scope and limits (食品添加物使用範圍及限量). Refresh CSVs from MOHW/FDA
+      or gazette and bump as_of_date.
