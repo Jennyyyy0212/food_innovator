@@ -8,5 +8,4 @@ langchain
 langchain-community
 langchain-google-genai
 PyYAML
-streamlit-nested-layout
 streamlit-local-storage

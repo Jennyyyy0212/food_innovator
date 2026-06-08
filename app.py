@@ -1,5 +1,4 @@
 import streamlit as st
-import streamlit_nested_layout  # noqa: F401 – enables nested layout support
 from google import genai
 from streamlit_local_storage import LocalStorage
 
